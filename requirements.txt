@@ -19,3 +19,9 @@ pyparsing
 python-dateutil
 six
 sounddevice
+flask==2.0.1
+flask-socketio==5.1.1
+python-socketio==5.4.0
+python-engineio==4.2.1
+werkzeug==2.0.3
+simple-websocket==0.10.1
