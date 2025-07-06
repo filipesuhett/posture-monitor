@@ -28,7 +28,7 @@ def run_posture_monitor(args):
             )
             good_frames, bad_frames = status
 
-            if (bad_frames / fps) > args.time_threshold:
+            if (bad_frames / fps) >= args.time_threshold:
                 send_warning()
 
         cv2.imshow("Posture Monitor", frame)

@@ -12,7 +12,6 @@ import time
 app = Flask(__name__)
 socketio = SocketIO(app)
 
-# Classe para simular os argumentos
 class Args:
     def __init__(self):
         self.offset_threshold = 10
@@ -20,13 +19,11 @@ class Args:
         self.neck_angle_threshold = 30
         self.torso_angle_threshold = 20
 
-# Variáveis globais para controle da câmera
 camera = None
 camera_thread = None
 is_camera_running = False
 args = Args()
 
-# Variáveis globais para a postura base e o último estado conhecido
 base_neck_angle = None
 base_torso_angle = None
 last_known_neck_angle = None
@@ -52,30 +49,27 @@ def generate_frames():
         results = pose.process(rgb)
 
         if results.pose_landmarks:
-            # Analisa a postura e obtém os ângulos atuais
             analyzed_frame, status, current_neck_angle, current_torso_angle = analyze_posture(
                 frame, results.pose_landmarks, w, h, args, font, fps, good_frames, bad_frames, base_neck_angle, base_torso_angle
             )
             good_frames, bad_frames = status
 
-            # Salva os últimos ângulos conhecidos de forma segura
             with capture_lock:
                 last_known_neck_angle = current_neck_angle
                 last_known_torso_angle = current_torso_angle
 
-            if (bad_frames / fps) > args.time_threshold:
+            if (bad_frames / fps) >= args.time_threshold:
                 send_warning()
             
             frame_to_send = analyzed_frame
         else:
             frame_to_send = frame
 
-        # Converte o frame para base64 para transmissão via WebSocket
         _, buffer = cv2.imencode('.jpg', frame_to_send)
         frame_base64 = base64.b64encode(buffer).decode('utf-8')
         socketio.emit('video_frame', {'frame': frame_base64})
 
-        time.sleep(1/30)  # Limita a 30 FPS
+        time.sleep(1/30) 
 
 @app.route('/')
 def index():
@@ -113,7 +107,6 @@ def capture_base_posture():
             base_neck_angle = last_known_neck_angle
             base_torso_angle = last_known_torso_angle
 
-            # Notifica o cliente que a postura base foi definida com os valores corretos
             socketio.emit('base_posture_set', {'neck_angle': base_neck_angle, 'torso_angle': base_torso_angle})
             print(f"Base posture set: Neck Angle={base_neck_angle}, Torso Angle={base_torso_angle}")
 
