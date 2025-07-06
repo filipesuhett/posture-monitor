@@ -26,8 +26,17 @@ camera_thread = None
 is_camera_running = False
 args = Args()
 
+# Variáveis globais para a postura base e o último estado conhecido
+base_neck_angle = None
+base_torso_angle = None
+last_known_neck_angle = None
+last_known_torso_angle = None
+capture_lock = threading.Lock()
+
 def generate_frames():
-    global camera, is_camera_running
+    global camera, is_camera_running, base_neck_angle, base_torso_angle
+    global last_known_neck_angle, last_known_torso_angle
+    
     pose = mp.solutions.pose.Pose()
     good_frames = bad_frames = 0
     font = cv2.FONT_HERSHEY_SIMPLEX
@@ -43,16 +52,26 @@ def generate_frames():
         results = pose.process(rgb)
 
         if results.pose_landmarks:
-            frame, status = analyze_posture(
-                frame, results.pose_landmarks, w, h, args, font, fps, good_frames, bad_frames
+            # Analisa a postura e obtém os ângulos atuais
+            analyzed_frame, status, current_neck_angle, current_torso_angle = analyze_posture(
+                frame, results.pose_landmarks, w, h, args, font, fps, good_frames, bad_frames, base_neck_angle, base_torso_angle
             )
             good_frames, bad_frames = status
 
+            # Salva os últimos ângulos conhecidos de forma segura
+            with capture_lock:
+                last_known_neck_angle = current_neck_angle
+                last_known_torso_angle = current_torso_angle
+
             if (bad_frames / fps) > args.time_threshold:
                 send_warning()
+            
+            frame_to_send = analyzed_frame
+        else:
+            frame_to_send = frame
 
         # Converte o frame para base64 para transmissão via WebSocket
-        _, buffer = cv2.imencode('.jpg', frame)
+        _, buffer = cv2.imencode('.jpg', frame_to_send)
         frame_base64 = base64.b64encode(buffer).decode('utf-8')
         socketio.emit('video_frame', {'frame': frame_base64})
 
@@ -81,5 +100,22 @@ def handle_disconnect():
         camera.release()
         camera = None
 
+@socketio.on('capture_base_posture')
+def capture_base_posture():
+    """
+    Captura a postura base usando os últimos ângulos conhecidos pelo
+    loop de geração de frames, garantindo consistência com o que o usuário vê.
+    """
+    global base_neck_angle, base_torso_angle, last_known_neck_angle, last_known_torso_angle
+    
+    with capture_lock:
+        if last_known_neck_angle is not None and last_known_torso_angle is not None:
+            base_neck_angle = last_known_neck_angle
+            base_torso_angle = last_known_torso_angle
+
+            # Notifica o cliente que a postura base foi definida com os valores corretos
+            socketio.emit('base_posture_set', {'neck_angle': base_neck_angle, 'torso_angle': base_torso_angle})
+            print(f"Base posture set: Neck Angle={base_neck_angle}, Torso Angle={base_torso_angle}")
+
 if __name__ == '__main__':
-    socketio.run(app, debug=True) 
+    socketio.run(app, debug=True)
