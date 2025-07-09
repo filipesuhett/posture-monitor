@@ -15,7 +15,7 @@ socketio = SocketIO(app)
 class Args:
     def __init__(self):
         self.offset_threshold = 10
-        self.time_threshold = 5
+        self.time_threshold = 3
         self.neck_angle_threshold = 30
         self.torso_angle_threshold = 20
 
