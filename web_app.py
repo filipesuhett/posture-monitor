@@ -1,10 +1,11 @@
+# web_app.py
 from flask import Flask, render_template
 from flask_socketio import SocketIO
 import cv2
 import base64
 import mediapipe as mp
 from utils.geometry import find_distance, find_angle
-from utils.notifier import send_warning
+from utils.notifier import send_warning  # send_warning agora é assíncrono
 from posture.analyzer import analyze_posture
 import threading
 import time
@@ -15,7 +16,7 @@ socketio = SocketIO(app)
 class Args:
     def __init__(self):
         self.offset_threshold = 10
-        self.time_threshold = 3
+        self.time_threshold = 1  # Tempo em segundos para o alerta
         self.neck_angle_threshold = 30
         self.torso_angle_threshold = 20
 
@@ -37,7 +38,9 @@ def generate_frames():
     pose = mp.solutions.pose.Pose()
     good_frames = bad_frames = 0
     font = cv2.FONT_HERSHEY_SIMPLEX
-    fps = 30
+    fps = 30 # Usar um valor fixo ou estimado
+    
+    warning_sent = False # Nova flag para controlar o envio do alerta
 
     while is_camera_running:
         ret, frame = camera.read()
@@ -49,7 +52,8 @@ def generate_frames():
         results = pose.process(rgb)
 
         if results.pose_landmarks:
-            analyzed_frame, status, current_neck_angle, current_torso_angle = analyze_posture(
+            # A função analyze_posture foi modificada para retornar também o status 'good'
+            analyzed_frame, status, current_neck_angle, current_torso_angle, good = analyze_posture(
                 frame, results.pose_landmarks, w, h, args, font, fps, good_frames, bad_frames, base_neck_angle, base_torso_angle
             )
             good_frames, bad_frames = status
@@ -57,10 +61,16 @@ def generate_frames():
             with capture_lock:
                 last_known_neck_angle = current_neck_angle
                 last_known_torso_angle = current_torso_angle
-
-            if (bad_frames / fps) >= args.time_threshold:
-                send_warning()
             
+            # Lógica de alerta aprimorada
+            if not good and not warning_sent and (bad_frames / fps) >= args.time_threshold:
+                send_warning() # Agora não bloqueia mais o loop
+                warning_sent = True # Marca que o aviso foi enviado
+            
+            # Reseta a flag de aviso quando a postura for corrigida
+            if good:
+                warning_sent = False
+
             frame_to_send = analyzed_frame
         else:
             frame_to_send = frame
@@ -70,6 +80,8 @@ def generate_frames():
         socketio.emit('video_frame', {'frame': frame_base64})
 
         time.sleep(1/30) 
+
+# ... (o restante do arquivo web_app.py permanece o mesmo) ...
 
 @app.route('/')
 def index():
@@ -96,10 +108,6 @@ def handle_disconnect():
 
 @socketio.on('capture_base_posture')
 def capture_base_posture():
-    """
-    Captura a postura base usando os últimos ângulos conhecidos pelo
-    loop de geração de frames, garantindo consistência com o que o usuário vê.
-    """
     global base_neck_angle, base_torso_angle, last_known_neck_angle, last_known_torso_angle
     
     with capture_lock:
@@ -107,7 +115,7 @@ def capture_base_posture():
             base_neck_angle = last_known_neck_angle
             base_torso_angle = last_known_torso_angle
 
-            socketio.emit('base_posture_set', {'neck_angle': base_neck_angle, 'torso_angle': base_torso_angle})
+            socketio.emit('base_posture_set', {'neck_angle': round(base_neck_angle, 2), 'torso_angle': round(base_torso_angle, 2)})
             print(f"Base posture set: Neck Angle={base_neck_angle}, Torso Angle={base_torso_angle}")
 
 if __name__ == '__main__':
